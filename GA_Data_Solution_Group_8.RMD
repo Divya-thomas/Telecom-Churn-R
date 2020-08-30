@@ -1,0 +1,1304 @@
+---
+title: 'Group Assignment of Predictive Modeling - Group 8'
+always_allow_html: yes
+output:
+  html_notebook: default
+  word_document: default
+---
+## Group Members : 
+### Saurav Suman, Anurag Kedia, Divya Thomas, Neha Tiwary, Peehu
+
+## Question :
+
+* Go through the attached dataset which includes the variable description in detail. Build 2 models based on Support Vector Machines and Discriminant Analysis to predict the customers who will cancel their service and interpret the result and compare the two with each other. Make sure you partition the data set by allocating 70% -for training data and 30% -for validating the results.
+
+## Solution : 
+
+### About Dataset:
+
+*	The dataset consists of information for 3,333 customers and includes independent variables such as Account weeks,contract renewal ,dataplan, usage, customer service calls, dayMins, daycalls, monthly charges ,overage fee, roaming minutes.
+
+*	The dependent variable in the dataset is whether the customer churned or not, which is indicated by a 1 for "yes" and 0 for "no." 
+
+*	Below, are the steps we will be following in order to predict customer churn, starting with data preparation and ending with validating the accuracy of our model and finally comparing the results across the models
+
+
+### Detailed Steps:
+
+
+### Read the given dataset
+```{r}
+
+mydata <- read.csv(file=file.choose())
+head(mydata)
+```
+
+### View structure of the dataset
+```{r}
+str(mydata)
+```
+
+### Check for the NA Values in the dataset
+```{r}
+sapply(mydata,function(x){sum(is.na(x))})
+```
+
+```{r}
+library(corrplot)
+corr_re <- cor(mydata)
+corrplot(corr_re)
+```
+
+### Shapiro-Wilk Test - for the test of normality
+```{r}
+
+#The Shapiro-Wilk test utilizes the null hypothesis principle to check
+#whether a sample X1, ..., Xn came from a normally distributed population?
+#The null-hypothesis of this test is that the population is normally distributed.
+
+shapiro.test(mydata$AccountWeeks)
+shapiro.test(mydata$ContractRenewal)
+shapiro.test(mydata$DataPlan)
+shapiro.test(mydata$DataUsage)
+shapiro.test(mydata$CustServCalls)
+shapiro.test(mydata$DayMins)
+shapiro.test(mydata$DayCalls)
+shapiro.test(mydata$MonthlyCharge)
+shapiro.test(mydata$OverageFee)
+shapiro.test(mydata$RoamMins)
+
+```
+
+We see in the above Shapiro test that few of the independent variables meet the normality test whose p-value is lower than 0.05 . 
+
+
+### Checking the Assumption of Equal Variance
+```{r}
+#Checking the Assumption of Equal Variance
+#First, in order to get a sense of our data and if we have equal variances among each class, we can use boxplots.
+
+#install.packages("gridExtra"))
+
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+plot <- list()
+
+box_variables <- c("AccountWeeks", "DataUsage","CustServCalls","DayMins","DayCalls","MonthlyCharge","OverageFee", "RoamMins")
+for(i in box_variables) {
+  plot[[i]] <- ggplot(mydata, aes_string(x = "Churn", y = i, col = "Churn", fill = "Churn",group = 1)) + 
+    geom_boxplot(alpha = 0.2) + 
+    theme(legend.position = "none") + 
+    scale_color_manual(values = c("blue", "red")) 
+    scale_fill_manual(values = c("blue", "red"))
+}
+
+do.call(grid.arrange, c(plot, nrow = 1))
+```
+
+### BoxM test
+```{r}
+#We are using the BoxM test in order to check our assumption of homogeneity of variance-covariance matrices.
+#H_o = Covariance matrices of the outcome variable are equal across all groups
+#H_a = Covariance matrices of the outcome variable are different for at least one group
+
+#install.packages("heplots")
+library(heplots)
+boxm <- boxM(mydata[, c(5:11, 2)], mydata$Churn) # using columns 1 to 5 and 8
+boxm
+
+```
+
+
+```{r}
+#When are choosing our alpha to be 0.05 then from our result we can conclude that we have a problem of heterogeneity of variance-covariance matrices. The plot below gives information of how the groups differ in the components that go into Box’s M test.
+
+plot(boxm)
+```
+
+
+### QQ Plot - Assumption Checking of LDA vs. QDA – Checking Assumption of Normality
+```{r}
+#With the following qqplots, we are checking that the distribution of the predictors is normally distributed within the 2 group .
+
+service_cancle.yes <- subset(mydata, Churn == 1)
+service_cancle.no <- subset(mydata, Churn == 0)
+
+
+variable_1 <- c("AccountWeeks", "DataUsage", "CustServCalls", "DayMins")
+
+## Those we will cancle the service
+
+par(mfrow = c(2, 2))
+for(i in variable_1) {
+  qqnorm(service_cancle.yes[[i]]); qqline(service_cancle.yes[[i]], col = 2 )
+}
+```
+
+```{r}
+variable_2 <- c("DayCalls", "MonthlyCharge", "OverageFee", "RoamMins")
+
+par(mfrow = c(2, 2))
+for(i in variable_2) {
+  qqnorm(service_cancle.yes[[i]]); qqline(service_cancle.yes[[i]], col = 2)
+}
+```
+
+```{r}
+
+## Those we will not cancle the service
+
+par(mfrow = c(2, 2))
+for(i in variable_1) {
+  qqnorm(service_cancle.no[[i]]); qqline(service_cancle.no[[i]], col = 2 )
+}
+```
+
+```{r}
+
+par(mfrow = c(2, 2))
+for(i in variable_2) {
+  qqnorm(service_cancle.no[[i]]); qqline(service_cancle.no[[i]], col = 2)
+}
+```
+
+### Density Plot of Numerical Variables
+```{r}
+#Another visualization technique is to plot the density of the predictors for each group. Through the plots below, we can detect if the predictors in each group are normally distributed and we can also check for equal variance.
+
+plot <- list()
+for(i in names(mydata)[-c(1,3,4)]){
+  plot[[i]] <- ggplot(mydata, aes_string(x = i, y = "..density..", col = "Churn")) + 
+    geom_density(aes(y = ..density..)) + 
+    scale_color_manual(values = c("blue", "red")) + 
+    theme(legend.position = "none")
+}
+
+do.call(grid.arrange, c(plot, nrow = 4))
+```
+
+### Histogram
+```{r}
+#install.packages("purrr")
+library(purrr)
+library(tidyr)
+library(ggplot2)
+mydata[-c(1,3,4)] %>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+```
+
+```{r}
+head(mydata)
+```
+
+### Convert target variable Churn  into categorial variable
+```{r}
+
+mydata$Churn <- as.factor(mydata$Churn)
+
+str(mydata)
+```
+
+
+
+### Scale the dataset
+```{r}
+library(scales)
+
+mydata_s <- scale(mydata[,-1])
+mydata_s = as.data.frame(mydata_s)
+
+head(mydata_s)
+
+```
+
+
+
+### Combine the Target variable "Churn" with rest of the predictor variables
+```{r}
+Churn <- mydata$Churn
+mydata_s_final <- cbind(mydata_s,Churn)
+
+head(mydata_s_final)
+
+```
+
+
+```{r}
+str(mydata_s_final)
+```
+
+
+### Split the dataset into 70:30 ration as train and test data
+```{r}
+library(caTools)
+
+set.seed(420)
+## split into training and test sets
+split = sample.split(mydata_s_final$Churn, SplitRatio = 0.7)
+
+# Create train and test set
+traindata = subset(mydata_s_final, split == TRUE)
+testdata = subset(mydata_s_final, split == FALSE)
+
+# Proportion of Table
+prop.table(table(traindata$Churn))
+prop.table(table(testdata$Churn))
+
+```
+
+### Build the LDA model using Fisher desDA function
+```{r}
+library(DiscriMiner)
+
+xtrain <- traindata[,1:10]
+ytrain <- traindata[,11]
+
+xtest <- testdata[,1:10]
+ytest <- testdata[,11]
+
+Fisher <- desDA(xtrain,ytrain)
+Fisher
+
+```
+
+### Build the model using Mahalanobis on train data
+```{r}
+Mahalanobis_Model_Train <- linDA(xtrain,ytrain)
+
+Mahalanobis_Model_Train
+```
+
+### Performance Measure on train data using Mahalanobis LDA Model
+```{r}
+
+tabtrain <- Mahalanobis_Model_Train$confusion
+
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_lda = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_lda
+
+# Sensitivity
+train_sens_lda = TP_train/(TP_train+FN_train)
+train_sens_lda
+
+# Specificity
+train_spec_lda = TN_train/(TN_train+FP_train)
+train_spec_lda
+
+
+```
+
+### Build the model using Mahalanobis on test data
+```{r}
+Mahalanobis_Model_Test <- linDA(xtest,ytest)
+
+Mahalanobis_Model_Test
+```
+
+### Performance Measure on test data using Mahalanobis LDA Model
+```{r}
+
+tabtrain <- Mahalanobis_Model_Test$confusion
+
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_lda = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_lda
+
+# Sensitivity
+train_sens_lda = TP_train/(TP_train+FN_train)
+train_sens_lda
+
+# Specificity
+train_spec_lda = TN_train/(TN_train+FP_train)
+train_spec_lda
+
+
+```
+
+
+
+### Build the LDA model using lda function on train data
+```{r}
+library(MASS)
+
+model_lda <- lda(traindata$Churn ~ . , traindata)
+
+model_lda
+
+
+```
+
+### Plotting the train data using the basic plot function illustrates how the observations are grouped together.
+```{r}
+
+plot(model_lda, col = as.integer(traindata$Churn))
+```
+
+```{r}
+plot(model_lda, dimen=1, type="both")
+```
+
+
+### Predict on train data using the above LDA model
+```{r}
+
+lda.train <- predict(model_lda)
+
+traindata$predict.class=lda.train$class
+
+traindata$predict.posterior=lda.train$posterior
+
+
+## Creating the confusion matrix
+tabtrain=with(traindata,table(Churn,predict.class))
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_lda = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_lda
+
+#Sensivity
+train_sens_lda = TP_train/(TP_train+FN_train)
+train_sens_lda
+
+#Specificity
+train_spec_lda = TN_train/(TN_train+FP_train)
+train_spec_lda
+
+```
+
+### Predict on test data using above LDA model
+```{r}
+
+lda.test <- predict(model_lda,testdata)
+
+testdata$predict.class=lda.test$class
+
+testdata$predict.posterior=lda.test$posterior
+
+
+## Creating the confusion matrix
+tabtest=with(testdata,table(Churn,predict.class))
+tabtest
+
+TN_test = tabtest[1,1]
+TP_test = tabtest[2,2]
+FN_test = tabtest[2,1]
+FP_test = tabtest[1,2]
+
+#Accuracy
+test_acc_lda = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_lda
+
+#Sensivity
+test_sens_lda = TP_test/(TP_test+FN_test)
+test_sens_lda
+
+#Specificity
+test_spec_lda = TN_test/(TN_test+FP_test)
+test_spec_lda
+
+```
+
+
+### Draw the AUC-ROC Curve of LDA model with train and test data
+```{r}
+library(pROC)
+#Train data
+
+roc_obj_train_lda = roc(traindata$Churn, traindata$predict.posterior[,2])
+plot(roc_obj_train_lda, print.auc = T,main = "AUC-ROC curves for Train data of LDA Model")
+
+
+#Test data
+
+roc_obj_test_lda = roc(testdata$Churn, testdata$predict.posterior[,2])
+plot(roc_obj_test_lda, print.auc = T,main = "AUC-ROC curves for Test data of LDA Model")
+
+
+#Combines AUC-ROC Curve of LDA train and test
+
+plot(roc_obj_train_lda, main = "Combined AUC-ROC curves for Train and Test for LDA Model", col='blue',xlab = "1 - Specificity")
+plot(roc_obj_test_lda,add=TRUE, col='red')
+legend('bottom', c("LDA Train Data", "LDA Test Data" ), fill = c('blue','red'), bty='n')
+
+```
+
+### Comparison of all performace measure of LDA model 
+```{r}
+results_train_lda = data.frame(train_acc_lda, train_sens_lda, train_spec_lda , as.numeric(roc_obj_train_lda$auc))
+names(results_train_lda) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC" )
+results_test_lda = data.frame(test_acc_lda, test_sens_lda, test_spec_lda ,as.numeric(roc_obj_test_lda$auc) )
+names(results_test_lda) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_lda, results_test_lda)
+row.names(df_fin) = c('LDA_train', 'LDA_test')
+df_fin
+
+
+```
+
+
+### Remove predicted score and class before running other models
+```{r}
+traindata$predict.class = NULL
+traindata$predict.posterior = NULL
+testdata$predict.class = NULL
+testdata$predict.posterior = NULL
+```
+
+```{r}
+head(traindata)
+```
+
+
+### Converting few predictor variables to categorical variables for LDA & QDA building model using MLR Package
+```{r}
+mydata$ContractRenewal <- as.factor(mydata$ContractRenewal)
+mydata$DataPlan <- as.factor(mydata$DataPlan)
+
+str(mydata)
+```
+
+
+### Split the dataset into 70:30 ration as train and test data
+```{r}
+library(caTools)
+
+set.seed(420)
+## split into training and test sets
+split = sample.split(mydata$Churn, SplitRatio = 0.7)
+
+# Create train and test set
+train = subset(mydata_s_final, split == TRUE)
+test = subset(mydata_s_final, split == FALSE)
+
+# Proportion of Table
+prop.table(table(traindata$Churn))
+prop.table(table(testdata$Churn))
+
+```
+
+### Create task for MLR
+```{r}
+library(mlr)
+trainTask = makeClassifTask(data = train,target = "Churn", positive = "1")
+testTask = makeClassifTask(data = test, target = "Churn", positive = "1")
+
+trainTask
+
+#normalize the variables***** NEW*****
+trainTask = normalizeFeatures(trainTask,method = "standardize")
+testTask = normalizeFeatures(testTask,method = "standardize")
+
+
+```
+
+### Build LDA Model using MLR Package 
+```{r}
+library(caret)
+lda.learner = makeLearner("classif.lda", predict.type = "prob")
+
+lda.model = mlr::train(lda.learner, trainTask)
+
+```
+
+### Predict on train data using above model
+```{r}
+
+lda.predict.train = predict(lda.model, trainTask)
+
+
+tabtrain = confusionMatrix(lda.predict.train$data$truth,lda.predict.train$data$response , positive = "1")
+
+tabtrain
+
+TN_train = tabtrain$table[1,1]
+TP_train = tabtrain$table[2,2]
+FN_train = tabtrain$table[1,2]
+FP_train = tabtrain$table[2,1]
+
+# Accuracy
+train_acc_ldamlr = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_ldamlr
+
+#Sensivity
+train_sens_ldamlr = TP_train/(TP_train+FN_train)
+train_sens_ldamlr
+
+#Specificity
+train_spec_ldamlr = TN_train/(TN_train+FP_train)
+train_spec_ldamlr
+
+
+
+```
+
+### Predict on test data using above model
+```{r}
+
+lda.predict.test = predict(lda.model, testTask)
+
+tabtest = confusionMatrix(lda.predict.test$data$truth,lda.predict.test$data$response , positive = "1")
+tabtest
+                           
+TN_test = tabtest$table[1,1]
+TP_test = tabtest$table[2,2]
+FN_test = tabtest$table[1,2]
+FP_test = tabtest$table[2,1]
+
+# Accuracy
+test_acc_ldamlr = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_ldamlr
+
+#Sensivity
+test_sens_ldamlr = TP_test/(TP_test+FN_test)
+test_sens_ldamlr
+
+#Specificity
+test_spec_ldamlr = TN_test/(TN_test+FP_test)
+test_spec_ldamlr
+
+
+```
+
+### Draw the AUC-ROC Curve of QDA model with train and test data
+```{r}
+library(ROCR)
+
+#Train data
+
+roc_obj_train_ldamlr = generateThreshVsPerfData(lda.predict.train, measures = list(fpr, tpr, mmce))
+plotROCCurves(roc_obj_train_ldamlr)
+
+
+#Test data
+
+roc_obj_test_ldamlr = generateThreshVsPerfData(lda.predict.test, measures = list(fpr, tpr, mmce))
+plotROCCurves(roc_obj_train_ldamlr)
+
+
+#Combines AUC-ROC Curve of QDA train and test
+
+df = generateThreshVsPerfData(list(train = lda.predict.train, test = lda.predict.test), measures = list(fpr, tpr))
+plotROCCurves(df)
+
+```
+
+
+### Comparison of all performace measure above of LDA model 
+```{r}
+results_train_ldamlr = data.frame(train_acc_ldamlr, train_sens_ldamlr, train_spec_ldamlr,as.numeric(mlr::performance(lda.predict.train, mlr::auc)))
+names(results_train_ldamlr) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY", "AUC-ROC")
+results_test_ldamlr = data.frame(test_acc_ldamlr, test_sens_ldamlr, test_spec_ldamlr,as.numeric(mlr::performance(lda.predict.train, mlr::auc)) )
+names(results_test_ldamlr) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_ldamlr, results_test_ldamlr)
+row.names(df_fin) = c('LDA_train', 'LDA_test')
+df_fin
+
+```
+
+### Build QDA Model using MLR Package 
+```{r}
+qda.learner = makeLearner("classif.qda", predict.type = "prob")
+
+qda.model = mlr::train(qda.learner, trainTask)
+
+
+```
+
+### Predict on train data using above model
+```{r}
+
+qda.predict.train = predict(qda.model, trainTask)
+
+tabtrain = table(qda.predict.train$data$truth,qda.predict.train$data$response)
+
+
+tabtrain = confusionMatrix(qda.predict.train$data$truth,qda.predict.train$data$response , positive = "1")
+
+tabtrain
+
+TN_train = tabtrain$table[1,1]
+TP_train = tabtrain$table[2,2]
+FN_train = tabtrain$table[1,2]
+FP_train = tabtrain$table[2,1]
+
+# Accuracy
+train_acc_qdamlr = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_qdamlr
+
+#Sensivity
+train_sens_qdamlr = TP_train/(TP_train+FN_train)
+train_sens_qdamlr
+
+#Specificity
+train_spec_qdamlr = TN_train/(TN_train+FP_train)
+train_spec_qdamlr
+
+
+
+```
+
+
+### Predict on test data using above model
+```{r}
+
+qda.predict.test = predict(qda.model, testTask)
+
+tabtest = confusionMatrix(qda.predict.test$data$truth,qda.predict.test$data$response , positive = "1")
+tabtest
+                           
+TN_test = tabtest$table[1,1]
+TP_test = tabtest$table[2,2]
+FN_test = tabtest$table[1,2]
+FP_test = tabtest$table[2,1]
+
+# Accuracy
+test_acc_qdamlr = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_qdamlr
+
+#Sensivity
+test_sens_qdamlr = TP_test/(TP_test+FN_test)
+test_sens_qdamlr
+
+#Specificity
+test_spec_qdamlr = TN_test/(TN_test+FP_test)
+test_spec_qdamlr
+
+
+```
+
+### Draw the AUC-ROC Curve of QDA model with train and test data
+```{r}
+library(ROCR)
+
+#Train data
+
+roc_obj_train_qdamlr = generateThreshVsPerfData(qda.predict.train, measures = list(fpr, tpr, mmce))
+plotROCCurves(roc_obj_train_qdamlr)
+
+
+#Test data
+
+roc_obj_test_qdamlr = generateThreshVsPerfData(qda.predict.test, measures = list(fpr, tpr, mmce))
+plotROCCurves(roc_obj_train_qdamlr)
+
+
+
+#Combines AUC-ROC Curve of QDA train and test
+
+df = generateThreshVsPerfData(list(train = qda.predict.train, test = qda.predict.test), measures = list(fpr, tpr))
+plotROCCurves(df)
+
+```
+
+
+### Comparison of all performace measure of LDA model 
+```{r}
+results_train_qdamlr = data.frame(train_acc_qdamlr, train_sens_qdamlr, train_spec_qdamlr,as.numeric(mlr::performance(qda.predict.train, mlr::auc)))
+names(results_train_qdamlr) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY", "AUC-ROC")
+results_test_qdamlr = data.frame(test_acc_qdamlr, test_sens_qdamlr, test_spec_qdamlr,as.numeric(mlr::performance(qda.predict.test, mlr::auc)) )
+names(results_test_qdamlr) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_qdamlr, results_test_qdamlr)
+row.names(df_fin) = c('QDA_train', 'QDA_test')
+df_fin
+
+```
+
+
+### Build the QDA Model using qda function
+```{r}
+
+model_qda <- qda(traindata$Churn ~ . , traindata)
+
+print(model_qda)
+
+```
+
+### Predict on train data using the above QDA model
+```{r}
+
+
+
+qda.train <- predict(model_qda)
+
+traindata$predict.class=qda.train$class
+
+traindata$predict.posterior=qda.train$posterior
+
+
+## Creating the confusion matrix
+tabtrain=with(traindata,table(Churn,predict.class))
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_qda = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_qda
+
+#Sensivity
+train_sens_qda = TP_train/(TP_train+FN_train)
+train_sens_qda
+
+#Specificity
+train_spec_qda = TN_train/(TN_train+FP_train)
+train_spec_qda
+
+```
+
+### Predict on test data using above QDA model
+```{r}
+
+qda.test <- predict(model_qda,testdata)
+
+testdata$predict.class=qda.test$class
+
+testdata$predict.posterior=qda.test$posterior
+
+
+## Creating the confusion matrix
+tabtest=with(testdata,table(Churn,predict.class))
+tabtest
+
+TN_test = tabtest[1,1]
+TP_test = tabtest[2,2]
+FN_test = tabtest[2,1]
+FP_test = tabtest[1,2]
+
+#Accuracy
+test_acc_qda = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_qda
+
+#Sensivity
+test_sens_qda = TP_test/(TP_test+FN_test)
+test_sens_qda
+
+#Specificity
+test_spec_qda = TN_test/(TN_test+FP_test)
+test_spec_qda
+
+```
+
+
+### Draw the AUC-ROC Curve of QDA model with train and test data
+```{r}
+library(pROC)
+#Train data
+
+roc_obj_train_qda = roc(traindata$Churn, traindata$predict.posterior[,2])
+plot(roc_obj_train_qda, print.auc = T,main = "AUC-ROC curves for Train data of QDA Model")
+
+
+#Test data
+
+roc_obj_test_qda = roc(testdata$Churn, testdata$predict.posterior[,2])
+plot(roc_obj_test_qda, print.auc = T,main = "AUC-ROC curves for Test data of QDA Model")
+
+
+#Combines AUC-ROC Curve of LDA train and test
+
+plot(roc_obj_train_qda, main = "Combined AUC-ROC curves for Train and Test for QDA Model", col='blue',xlab = "1 - Specificity")
+plot(roc_obj_test_qda,add=TRUE, col='red')
+legend('bottom', c("QDA Train Data", "QDA Test Data" ), fill = c('blue','red'), bty='n')
+
+```
+
+
+### Comparison of all performace measure of QDA model 
+```{r}
+results_train_qda = data.frame(train_acc_qda, train_sens_qda, train_spec_qda , as.numeric(roc_obj_train_qda$auc))
+names(results_train_qda) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC" )
+results_test_qda = data.frame(test_acc_qda, test_sens_qda, test_spec_qda ,as.numeric(roc_obj_test_qda$auc) )
+names(results_test_qda) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_qda, results_test_qda)
+row.names(df_fin) = c('QDA_train', 'QDA_test')
+df_fin
+
+```
+
+
+### Remove predicted score and class before running other models
+```{r}
+traindata$predict.class = NULL
+traindata$predict.posterior = NULL
+testdata$predict.class = NULL
+testdata$predict.posterior = NULL
+```
+
+
+```{r}
+head(traindata)
+head(testdata)
+
+```
+
+
+### Build SVM model on Train dataset
+```{r}
+library(e1071)
+
+
+model_svm <- svm(traindata$Churn ~ . , data = traindata, kernel="linear", scale = FALSE)
+
+model_svm
+
+
+```
+
+### Prediction on Train dataset using SVM Model
+```{r}
+
+traindata$predict.class <- predict(model_svm,traindata, decision.values=TRUE)
+
+traindata$decision.values <- attributes(traindata$predict.class)$decision.values
+
+
+## Creating the confusion matrix
+tabtrain=with(traindata,table(Churn,predict.class))
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_svm = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_svm
+
+#Sensivity
+train_sens_svm = TP_train/(TP_train+FN_train)
+train_sens_svm
+
+#Specificity
+train_spec_svm = TN_train/(TN_train+FP_train)
+train_spec_svm
+
+
+```
+
+
+### Prediction on Test dataset using SVM Model
+```{r}
+
+testdata$predict.class <- predict(model_svm , newdata = testdata , decision.values=TRUE)
+
+testdata$decision.values <- attributes(testdata$predict.class)$decision.values
+
+## Creating the confusion matrix
+tabtest=with(testdata,table(Churn,predict.class))
+tabtest
+
+TN_test = tabtest[1,1]
+TP_test = tabtest[2,2]
+FN_test = tabtest[2,1]
+FP_test = tabtest[1,2]
+
+#Accuracy
+test_acc_svm = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_svm
+
+#Sensivity
+test_sens_svm = TP_test/(TP_test+FN_test)
+test_sens_svm
+
+#Specificity
+test_spec_svm = TN_test/(TN_test+FP_test)
+test_spec_svm
+```
+
+### AUC-ROC Curve for SVM model on Train and Test dataset
+```{r}
+
+library(pROC)
+
+#Train data - Plot ROC curve
+roc_obj_train_svm <- plot.roc(as.numeric(traindata$Churn), traindata$decision.values, main = "AUC-ROC curves for Train data of SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+roc_obj_train_svm
+
+#Test data - Plot ROC curve
+roc_obj_test_svm <- plot.roc(as.numeric(testdata$Churn), testdata$decision.values, main = "AUC-ROC curves for Test data of SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+
+roc_obj_test_svm
+
+
+plot(roc_obj_train_svm, main = "Combined AUC-ROC curves for Train and Test for SVM Model", col='blue',xlab = "1 - Specificity")
+plot(roc_obj_test_svm,add=TRUE, col='red')
+legend('bottom', c("SVM Train Data", "SVM Test Data" ), fill = c('blue','red'), bty='n')
+
+
+```
+
+
+### Comparison of all the performace measure of SVM Model  on Train and Test dataset
+```{r}
+results_train_svm = data.frame(train_acc_svm, train_sens_svm, train_spec_svm , as.numeric(roc_obj_train_svm$auc))
+names(results_train_svm) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC" )
+results_test_svm = data.frame(test_acc_svm, test_sens_svm, test_spec_svm ,as.numeric(roc_obj_test_svm$auc) )
+names(results_test_svm) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_svm, results_test_svm)
+row.names(df_fin) = c('SVM_Train', 'SVM_Test')
+df_fin
+```
+
+### Remove predicted score and class before running other models
+```{r}
+traindata$predict.class = NULL
+traindata$decision.values = NULL
+testdata$predict.class = NULL
+testdata$decision.values = NULL
+```
+
+
+```{r}
+head(traindata)
+head(testdata)
+```
+
+### Find the best cost and gamma value for tuning SVM Model
+```{r}
+
+#svm_tune <- tune.svm(Churn~., data = traindata, gamma = c(.5,1,2), cost = 2^(2:4))
+
+svm_tune <- tune.svm(Churn~., data = traindata, gamma = 2^(-2:1), cost = 2^(-2:5))
+summary(svm_tune)
+
+plot(svm_tune)
+
+
+```
+
+### Build the SVM Model with some Tuned parameters using kernal as radial
+```{r}
+model_svm_tune_radial <- svm(Churn ~ ., data=traindata, kernel="radial", cost=2, gamma=0.25)
+summary(model_svm_tune_radial)
+```
+
+
+### Prediction on Train dataset using Tuned SVM Model ( kernel = radial )
+```{r}
+
+traindata$predict.class <- predict(model_svm_tune_radial,traindata, decision.values=TRUE)
+
+traindata$decision.values <- attributes(traindata$predict.class)$decision.values
+
+
+## Creating the confusion matrix
+tabtrain=with(traindata,table(Churn,predict.class))
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_svm_tune_radial = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_svm_tune_radial
+
+#Sensivity
+train_sens_svm_tune_radial = TP_train/(TP_train+FN_train)
+train_sens_svm_tune_radial
+
+#Specificity
+train_spec_svm_tune_radial = TN_train/(TN_train+FP_train)
+train_spec_svm_tune_radial
+
+
+#table(Actual=traindata$Churn,predicted=svm_train_prediction)
+```
+
+### Prediction on Test dataset using Tuned SVM Model ( kernel = radial )
+```{r}
+
+testdata$predict.class <- predict(model_svm_tune_radial,testdata, decision.values=TRUE)
+
+testdata$decision.values <- attributes(testdata$predict.class)$decision.values
+
+
+## Creating the confusion matrix
+tabtest=with(testdata,table(Churn,predict.class))
+tabtest
+
+TN_test = tabtest[1,1]
+TP_test = tabtest[2,2]
+FN_test = tabtest[2,1]
+FP_test = tabtest[1,2]
+
+# Accuracy
+test_acc_svm_tune_radial = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_svm_tune_radial
+
+#Sensivity
+test_sens_svm_tune_radial = TP_test/(TP_test+FN_test)
+test_sens_svm_tune_radial
+
+#Specificity
+test_spec_svm_tune_radial = TN_test/(TN_test+FP_test)
+test_spec_svm_tune_radial
+
+
+#table(Actual=testdata$Churn,predicted=svm_test_prediction)
+```
+
+
+### AUC-ROC Curve for SVM model on Train and Test dataset
+```{r}
+
+library(pROC)
+
+#Train data - Plot ROC curve
+roc_obj_train_svm_tune_radial <- plot.roc(as.numeric(traindata$Churn), traindata$decision.values, main = "AUC-ROC curves for Train data of Tuned SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+roc_obj_train_svm_tune_radial
+
+#Test data - Plot ROC curve
+roc_obj_test_svm_tune_radial <- plot.roc(as.numeric(testdata$Churn), testdata$decision.values, main = "AUC-ROC curves for Test data of Tuned SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+
+roc_obj_test_svm_tune_radial
+
+
+plot(roc_obj_train_svm_tune_radial, main = "Combined AUC-ROC curves for Train and Test for Tuned SVM Model(kernal=radial)", col='blue',xlab = "1 - Specificity")
+plot(roc_obj_test_svm_tune_radial,add=TRUE, col='red')
+legend('bottom', c("SVM Tuned Train Data", "SVM Tuned Test Data" ), fill = c('blue','red'), bty='n')
+
+
+```
+
+
+### Comparison of all the performace measure of Tuned SVM Model using radial kernal on Train and Test dataset
+```{r}
+results_train_svm_tune_radial = data.frame(train_acc_svm_tune_radial, train_sens_svm_tune_radial, train_spec_svm_tune_radial , as.numeric(roc_obj_train_svm_tune_radial$auc))
+names(results_train_svm_tune_radial) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC" )
+results_test_svm_tune_radial = data.frame(test_acc_svm_tune_radial, test_sens_svm_tune_radial, test_spec_svm_tune_radial ,as.numeric(roc_obj_test_svm_tune_radial$auc) )
+names(results_test_svm_tune_radial) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_svm_tune_radial, results_test_svm_tune_radial)
+row.names(df_fin) = c('SVM_Tuned_Train_Radial', 'SVM_Tuned_Test_Radial')
+df_fin
+```
+
+```{r}
+### Remove predicted score and class before running other models
+traindata$predict.class = NULL
+traindata$decision.values = NULL
+testdata$predict.class = NULL
+testdata$decision.values = NULL
+```
+
+```{r}
+head(traindata)
+head(testdata)
+```
+
+### Build the SVM Tuned model using kernel as polynomial
+```{r}
+model_svm_tune_poly <- svm(Churn ~ ., data=traindata, kernel="polynomial", cost=2, gamma=0.25)
+summary(model_svm_tune_poly)
+```
+
+### Prediction on Train dataset using Tuned SVM Model ( kernel = polynomial)
+```{r}
+
+traindata$predict.class <- predict(model_svm_tune_poly,traindata, decision.values=TRUE)
+
+traindata$decision.values <- attributes(traindata$predict.class)$decision.values
+
+
+## Creating the confusion matrix
+tabtrain=with(traindata,table(Churn,predict.class))
+tabtrain
+
+TN_train = tabtrain[1,1]
+TP_train = tabtrain[2,2]
+FN_train = tabtrain[2,1]
+FP_train = tabtrain[1,2]
+
+# Accuracy
+train_acc_svm_tune_poly = (TN_train+TP_train)/(TN_train+TP_train+FN_train+FP_train)
+train_acc_svm_tune_poly
+
+#Sensivity
+train_sens_svm_tune_poly = TP_train/(TP_train+FN_train)
+train_sens_svm_tune_poly
+
+#Specificity
+train_spec_svm_tune_poly = TN_train/(TN_train+FP_train)
+train_spec_svm_tune_poly
+
+
+#table(Actual=traindata$Churn,predicted=svm_train_prediction)
+```
+
+### Prediction on Test dataset using Tuned SVM Model ( kernal = polynomial)
+```{r}
+
+testdata$predict.class <- predict(model_svm_tune_poly,testdata, decision.values=TRUE)
+
+testdata$decision.values <- attributes(testdata$predict.class)$decision.values
+
+
+## Creating the confusion matrix
+tabtest=with(testdata,table(Churn,predict.class))
+tabtest
+
+TN_test = tabtest[1,1]
+TP_test = tabtest[2,2]
+FN_test = tabtest[2,1]
+FP_test = tabtest[1,2]
+
+# Accuracy
+test_acc_svm_tune_poly = (TN_test+TP_test)/(TN_test+TP_test+FN_test+FP_test)
+test_acc_svm_tune_poly
+
+#Sensivity
+test_sens_svm_tune_poly = TP_test/(TP_test+FN_test)
+test_sens_svm_tune_poly
+
+#Specificity
+test_spec_svm_tune_poly = TN_test/(TN_test+FP_test)
+test_spec_svm_tune_poly
+
+
+#table(Actual=testdata$Churn,predicted=svm_test_prediction)
+```
+
+### AUC-ROC Curve for SVM model on Train and Test dataset
+```{r}
+
+library(pROC)
+
+#Train data - Plot ROC curve
+roc_obj_train_svm_tune_poly <- plot.roc(as.numeric(traindata$Churn), traindata$decision.values, main = "AUC-ROC curves for Train data of Tuned SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+roc_obj_train_svm_tune_poly
+
+#Test data - Plot ROC curve
+roc_obj_test_svm_tune_poly <- plot.roc(as.numeric(testdata$Churn), testdata$decision.values, main = "AUC-ROC curves for Test data of Tuned SVM Model" , xlab = "1 - Specificity", print.auc=TRUE)
+
+roc_obj_test_svm_tune_poly
+
+
+plot(roc_obj_train_svm_tune_poly, main = "Combined AUC-ROC curves for Train and Test for Tuned SVM Model", col='blue',xlab = "1 - Specificity")
+plot(roc_obj_test_svm_tune_poly,add=TRUE, col='red')
+legend('bottom', c("SVM Tuned Train Data", "SVM Tuned Test Data" ), fill = c('blue','red'), bty='n')
+
+
+```
+
+### Comparison of all the performace measure of Tuned SVM Model  on Train and Test dataset
+```{r}
+results_train_svm_tune_poly = data.frame(train_acc_svm_tune_poly, train_sens_svm_tune_poly, train_spec_svm_tune_poly , as.numeric(roc_obj_train_svm_tune_poly$auc))
+names(results_train_svm_tune_poly) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC" )
+results_test_svm_tune_poly = data.frame(test_acc_svm_tune_poly, test_sens_svm_tune_poly, test_spec_svm_tune_poly ,as.numeric(roc_obj_test_svm_tune_poly$auc) )
+names(results_test_svm_tune_poly) = c("ACCURACY", "SENSITIVITY", "SPECIFICITY" , "AUC-ROC")
+
+
+df_fin =rbind(results_train_svm_tune_poly, results_test_svm_tune_poly)
+row.names(df_fin) = c('SVM_Tuned_Train_Polynomial', 'SVM_Tuned_Test_Polynomial')
+df_fin
+```
+
+## Comparing best of both the models - LDA and SVM with their performance - Accuracy , Sensitivity, Specificity and AUC-ROC Curve
+```{r}
+
+df_fin =rbind(results_train_ldamlr, results_test_ldamlr, results_train_qdamlr, results_test_qdamlr, results_train_svm_tune_poly,results_test_svm_tune_poly)
+row.names(df_fin) = c('LDA_Train', 'LDA_Test','QDA_Train', 'QDA_Test','SVM_Tune_Train','SVM_Tune_Test')
+#round(df_fin,2)
+
+#install.packages("kableExtra")
+library(kableExtra)
+print("Model Performance Comparison Metrics ")
+kable(round(df_fin,2)) %>%
+    kable_styling(c("striped","bordered"))
+
+```
+
+
+## CONCLUSION
+
+The dataset which we used in our analysis includes a list of service-related factors about existing customers and information about whether they have stayed or left the service provider.
+We have performed versions of 2 algorithms like LDA and SVM.
+By performing the fisher and mahalanobis LDA, we could understand the contribution of the factors  which would impact the churn. From the above said models an increase in the below variables affects the probability of customer churn occurrence: 
+
+•	monthly charge 
+•	data usage 
+•	contract renewal 
+•	day minutes
+•	overage fee
+•	customer service calls
+•	roam min
+•	day call
+
+### Understanding the business through model deployment:
+
+Let us understand the churn by looking at the variable importance mentioned above.
+
+*	Increase in the overage fee of a customer is often associated with strong customer dissatisfaction, as it is     the fee which he/she is likely to pay to break the contract.
+*	If a customer has more data usage it  may indicate that the customer could be persuaded by competitor providing   data discounts offers and he/she may churn eventually.
+*	Also, more number of customer service calls, suggest the customer is unhappy and has lot  of complaints to be    resolved indicating eventual customer churn. 
+*	Increase in the daytime calls and roaming minutes may indicate customers moving towards the competitor with      better offers and services. 
+*	There are also variables which explains less churn of customers, such as data plan renewal and contract          renewal,which suggests more offers or services taken by customers indicating his/her satisfaction. 
+*	However ,there seems to be counter-intuitive effect  of monthly charge variable because when the monthly charge   increases the churn reduces, which is likely to be caused by the collinearity between MonthlyCharge and          DataUsage and between MonthlyCharge and DayMins. But, it does not necessarily impact predictive accuracy.        Since, we rely upon the performance on the validation set to evaluate predictive accuracy of the model.
+
+
+### Data Limitation and model comparison:
+
+There was a limitation in converting the independent  categorical variables into factors to perform LDA and also the limitation of partial fulfillment of the assumptions like normality and covariance.
+So, we went ahead and performed the models such as QDA and SVM and compared it with the LDA metric output.
+
+
+### Comparing models:
+
+Since, this is the churn prediction model, it is important that the model deployed considers sensitivity as an important performance metric .By comparing the models across, we could see that :
+
+*	Tuned SVM model gives out the best results in terms of the sensitivity without much overfitting of the model.
+*	LDA has lower sensitivity when compared to SVM, as it is affected by the covariance, normality of data.
+*	Because of the data skewness and noise , SVM has the advantage over LDA and QDA because we are using the kernels in SVM .
+*	But, we can still use the  LDA for the explanatory power, since SVM with kernels behaves like a black box, which would not give us more information on the variable importance.
+
+
+Thus, both the models help us to achieve good differentiation among the churn variable groups.
+
+
+
+
+
